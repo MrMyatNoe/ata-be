@@ -1,0 +1,14 @@
+spring:
+  data:
+    mongodb:
+      database: ${ACL_MONGODB_DATABASE:ata-salary}
+      uri: ${ACL_MONGODB_URI:mongodb://localhost:27017}
+  application:
+    name: ata-be
+  config:
+    import: optional:classpath:data.json   
+
+mongock:
+  change-logs-scan-package: 'com.tmn.ata.config'
+salaries:
+  fileName: "salary.json"
