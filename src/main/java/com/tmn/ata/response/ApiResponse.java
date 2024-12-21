@@ -1,12 +1,14 @@
-package com.tmn.ata.controller.rest;
+package com.tmn.ata.response;
 
 import java.time.LocalDateTime;
 
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 
 @Data
 @Builder
+@AllArgsConstructor
 public class ApiResponse<T> {
 
 	private LocalDateTime timestamp;

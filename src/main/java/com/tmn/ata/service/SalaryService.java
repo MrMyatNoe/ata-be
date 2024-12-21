@@ -3,6 +3,7 @@ package com.tmn.ata.service;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -18,9 +19,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.tmn.ata.controller.rest.SalaryField;
 import com.tmn.ata.controller.rest.SortDirection;
 import com.tmn.ata.dto.SalaryDto;
+import com.tmn.ata.mapper.SalaryMapper;
 import com.tmn.ata.model.Salary;
 import com.tmn.ata.repository.SalaryRepository;
-import com.tmn.ata.util.DateHelper;
+import com.tmn.ata.response.SalaryCustomResponse;
+import com.tmn.ata.response.SalaryResponse;
+import com.tmn.ata.util.CurrencyHelper;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -31,21 +35,6 @@ import lombok.extern.slf4j.Slf4j;
 public class SalaryService {
 
 	private final SalaryRepository repository;
-
-	public String getHello() {
-		log.info("service: testing");
-		return "hello";
-	}
-
-	public List<Salary> saveSalaries(List<Salary> salaries) {
-		log.info("service: saving salaries ");
-		return repository.saveAll(salaries);
-	}
-
-	public List<Salary> getSalaries() {
-		log.info("service: get salaries ");
-		return repository.findAll();
-	}
 
 	public void readAndSaveSalaries() {
 		try {
@@ -59,7 +48,7 @@ public class SalaryService {
 			});
 
 			List<Salary> salaries = salaryDtos.stream()
-                    .map(this::convertToEntity)
+                    .map(dto -> SalaryMapper.convertToEntity(dto))
                     .collect(Collectors.toList());
 
 			// Save to MongoDB
@@ -71,7 +60,8 @@ public class SalaryService {
 		}
 	}
 
-	public List<SalaryDto> getSalariesSorted(List<String> fields, List<String> directions,int skip, int limit) {
+	public List<SalaryResponse> getSalariesSorted(List<String> fields, List<String> directions, int skip, int limit) {
+		log.info("service: sorted ", fields, directions, skip, limit);
 		List<SalaryField> salaryFields = fields.stream().map(SalaryField::fromValue).collect(Collectors.toList());
 
 		List<SortDirection> sortDirections = directions.stream().map(SortDirection::fromValue)
@@ -87,41 +77,73 @@ public class SalaryService {
         Pageable pageable = PageRequest.of(skip / limit, limit, sort);
 		Page<Salary> list = repository.findAll(pageable);
 
-		return list.stream().map(this::convertToDto).collect(Collectors.toList());
+		return list.stream().map(salary -> SalaryMapper.convertToResponse(salary)).collect(Collectors.toList());
 	}
 	
-	private Salary convertToEntity(SalaryDto dto) {
-        return Salary.builder()
-                .timestamp(DateHelper.parseDate(dto.getTimestamp()))
-                .employer(dto.getEmployer())
-                .location(dto.getLocation())
-                .jobTitle(dto.getJobTitle())
-                .yearsAtEmployer(dto.getYearsAtEmployer())
-                .yearsOfExperience(dto.getYearsOfExperience())
-                .salary(dto.getSalary())
-                .signingBonus(dto.getSigningBonus())
-                .annualBonus(dto.getAnnualBonus())
-                .annualStockValueBonus(dto.getAnnualStockValueBonus())
-                .gender(dto.getGender())
-                .additionalComments(dto.getAdditionalComments())
-                .build();
+	public List<Map<String, Object>> getFilteredSalaries(List<String> fields, List<String> directions) {
+		log.info("service: filtered salaries ", fields, directions);
+		List<SalaryField> salaryFields = fields.stream().map(SalaryField::fromValue).collect(Collectors.toList());
+		List<SortDirection> sortDirections = directions.stream().map(SortDirection::fromValue)
+				.collect(Collectors.toList());
+
+		List<Sort.Order> orders = IntStream.range(0, salaryFields.size())
+				.mapToObj(i -> new Sort.Order(
+						sortDirections.get(i) == SortDirection.ASC ? Sort.Direction.ASC : Sort.Direction.DESC,
+						salaryFields.get(i).getValue()))
+				.collect(Collectors.toList());
+
+        List<Salary> salaries = repository.findAll(Sort.by(orders));
+        return salaries.stream()
+                .map(salary -> filterFields(salary, fields))
+                .collect(Collectors.toList());
     }
 	
-	private SalaryDto convertToDto(Salary salary) {
-        return SalaryDto.builder()
-                .id(salary.getId())
-                .timestamp(salary.getTimestamp().toString())
-                .employer(salary.getEmployer())
-                .location(salary.getLocation())
-                .jobTitle(salary.getJobTitle())
-                .yearsAtEmployer(salary.getYearsAtEmployer())
-                .yearsOfExperience(salary.getYearsOfExperience())
-                .salary(salary.getSalary())
-                .signingBonus(salary.getSigningBonus())
-                .annualBonus(salary.getAnnualBonus())
-                .annualStockValueBonus(salary.getAnnualStockValueBonus())
-                .gender(salary.getGender())
-                .additionalComments(salary.getAdditionalComments())
-                .build();
+	public List<SalaryCustomResponse> filterSalaries(Map<String, String> filters) {
+		return repository.findAll().stream()
+				.filter(salary -> applyFilters(salary, filters))
+				.map(salary -> SalaryMapper.convertToRecord(salary)).collect(Collectors.toList());
+	}
+	
+	private boolean applyFilters(Salary salary, Map<String, String> filters) {
+		for (Map.Entry<String, String> filter : filters.entrySet()) {
+			String key = filter.getKey();
+			String value = filter.getValue();
+			switch (key) {
+			case "jobTitle":
+				if (!salary.getJobTitle().equalsIgnoreCase(value)) {
+					return false;
+				}
+				break;
+			case "salary[gte]":
+				double salaryValue = CurrencyHelper.parseSalary(salary.getSalary());
+				if (salaryValue < Double.parseDouble(value)) {
+					return false;
+				}
+				break;
+			case "salary[lte]":
+				double salaryValueLte = CurrencyHelper.parseSalary(salary.getSalary());
+				if (salaryValueLte > Double.parseDouble(value)) {
+					return false;
+				}
+				break;
+			case "gender":
+				if (!salary.getGender().equalsIgnoreCase(value)) {
+					return false;
+				}
+				break;
+			default:
+				break;
+			}
+		}
+		return true;
+	}
+	
+    private Map<String, Object> filterFields(Salary salary, List<String> fields) {
+        ObjectMapper objectMapper = new ObjectMapper();
+        Map<String, Object> salaryMap = objectMapper.convertValue(salary, Map.class);
+        return salaryMap.entrySet().stream()
+                .filter(entry -> fields.contains(entry.getKey()))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
+	
 }

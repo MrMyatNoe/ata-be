@@ -17,4 +17,9 @@ public class DateHelper {
 			return null;
 		}
 	}
+	
+	public static String DateToFormat(Date timestamp) {
+		SimpleDateFormat outputFormat = new SimpleDateFormat("M/d/yyyy HH:mm:ss");
+		return outputFormat.format(timestamp);
+	}
 }
